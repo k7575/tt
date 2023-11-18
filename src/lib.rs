@@ -4,12 +4,13 @@ use std::fmt::Display;
 use std::fs::{File, OpenOptions};
 use std::io::Read;
 use std::os::fd::AsRawFd;
+use std::io::Error as IoError;
 
 nix::ioctl_write_int!(tunsetiff, b'T', 202);
 
 #[derive(Debug)]
 pub enum TTError {
-    OpenTun(String),
+    OpenTun(IoError),
     Ioctl(String),
 }
 
@@ -35,10 +36,9 @@ pub struct TT<'a> {
 
 impl<'a> TT<'a> {
     pub fn build(&self) -> Result<File, TTError> {
-        let fd: File;
-        match OpenOptions::new().read(true).write(true).open(self.dev_tun) {
-            Ok(value) => fd = value,
-            Err(e) => return Err(TTError::OpenTun(e.to_string())),
+        let fd: File = match OpenOptions::new().read(true).write(true).open(self.dev_tun) {
+            Ok(value) => value,
+            Err(e) => return Err(TTError::OpenTun(e)),
         };
 
         let mut ifr = ifreq {
@@ -60,7 +60,7 @@ impl<'a> TT<'a> {
             }
         }
         if let Err(e) = unsafe { tunsetiff(fd.as_raw_fd(), &ifr as *const _ as _) } {
-            return Err(TTError::OpenTun(e.to_string()));
+            return Err(TTError::Ioctl(e.to_string()));
         }
         Ok(fd)
     }
@@ -88,24 +88,23 @@ pub enum IPI {
     },
 }
 impl IPI {
-    pub fn de(a: &[u8]) -> IPI {
+    pub fn de(a: &[u8]) -> Self {
         if a.len() < 20 {
-            return IPI::None;
+            return Self::None;
         }
 
         if ((a[0]) >> 4) == 4 {
             let mut ip_s = [0u8; 4];
             let mut ip_d = [0u8; 4];
-            let mut ip_p = 0u8;
             ip_s.copy_from_slice(&a[12..16]);
             ip_d.copy_from_slice(&a[16..20]);
-            ip_p = a[9];
-            return IPI::IPV4 {
+            let ip_p = a[9];
+            return Self::IPV4 {
                 ip_source: ip_s,
                 ip_destination: ip_d,
                 ip_protocol: ip_p,
             };
         }
-        IPI::None
+        Self::None
     }
 }
